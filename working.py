@@ -78,14 +78,26 @@ def extract_audio_segment(audio_path, start_time, duration):
 
 def process_inputs(image, audio):
     """Process a single frame and audio segment"""
+    # The system prompt instructs the model on how to behave.
+    system_prompt = (
+        "You are an expert AI assistant for a visually impaired person, acting as their eyes. "
+        "Based on the image and audio from their surroundings, provide clear, concise, and real-time "
+        "descriptions for safe navigation. Focus on the path ahead, obstacles (e.g., curbs, stairs, people), "
+        "potential hazards (e.g., moving vehicles), and key landmarks (e.g., doors, crosswalks). "
+        "Give direct, simple instructions like 'Walk straight ahead,' 'Caution: step down for the curb,' or "
+        "'Stop, a car is approaching from your left.' Your tone should be calm and reassuring."
+    )
+    
     messages = [
         {
-        "role": "user",
-        "content": [
-            {"type": "image", "image": image},
-            {"type": "audio", "audio": audio},
-        ]
-    }]
+            "role": "user",
+            "content": [
+                {"type": "text", "text": system_prompt},
+                {"type": "image", "image": image},
+                {"type": "audio", "audio": audio},
+            ]
+        }
+    ]
 
     input_ids = processor.apply_chat_template(
         messages,
@@ -117,7 +129,8 @@ def process_video(video_path, audio_path):
         frame_paths, duration = extract_frames_from_video(video_path)
         
         if not frame_paths:
-            return "Error: No frames extracted from video."
+            yield "Error: No frames extracted from video."
+            return
         
         all_results = []
         
@@ -138,20 +151,21 @@ def process_video(video_path, audio_path):
             
             # Format result with timestamp
             time_str = f"[{timestamp:.1f}s - {timestamp + segment_duration:.1f}s]"
-            all_results.append(f"{time_str}: {result}")
+            current_result = f"{time_str}: {result}"
+            all_results.append(current_result)
             
             # Clean up
             os.unlink(audio_segment)
+
+            yield "\n\n".join(all_results)
             
         # Clean up frame files
         for path, _ in frame_paths:
             if os.path.exists(path):
                 os.unlink(path)
                 
-        return "\n\n".join(all_results)
-    
     except Exception as e:
-        return f"Error processing video: {str(e)}"
+        yield f"Error processing video: {str(e)}"
 
 # Gradio interface
 iface = gr.Interface(
