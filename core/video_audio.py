@@ -54,10 +54,10 @@ class VideoChunkProcessor:
         chunk_id = 0
         while current_time < self.duration and not self.stop_event.is_set():
             frame_path = self.extract_chunk_frame(current_time)
-            audio_path_chunk = self.extract_chunk_audio(current_time)
             
             if frame_path:
-                self.processing_queue.put((chunk_id, current_time, frame_path, audio_path_chunk))
+                # Audio is no longer chunked, so we don't pass it here.
+                self.processing_queue.put((chunk_id, current_time, frame_path))
                 chunk_id += 1
             
             current_time += CHUNK_DURATION_S
@@ -70,8 +70,9 @@ class VideoChunkProcessor:
             if chunk_data is None: # End of stream
                 break
             
-            chunk_id, start_time, frame_path, audio_path_chunk = chunk_data
-            result = self.process_chunk(chunk_id, start_time, frame_path, audio_path_chunk)
+            # Unpack data without the chunked audio path
+            chunk_id, start_time, frame_path = chunk_data
+            result = self.process_chunk(chunk_id, start_time, frame_path)
             self.result_queue.put(result)
         self.result_queue.put(None) # Sentinel to stop result loop
 
@@ -126,31 +127,17 @@ class VideoChunkProcessor:
     
     def extract_chunk_audio(self, start_time):
         """Extract audio chunk"""
-        try:
-            audio = AudioSegment.from_file(self.audio_path)
-            start_ms = max(0, int(start_time * 1000))
-            end_ms = min(len(audio), int((start_time + CHUNK_DURATION_S) * 1000))
-            segment = audio[start_ms:end_ms]
-            
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-            segment.export(temp_file.name, format="wav")
-            return temp_file.name
-        except Exception as e:
-            print(f"Error extracting audio: {e}")  # Added error logging
-            # Return silent audio on error
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-            empty_audio = AudioSegment.silent(duration=int(CHUNK_DURATION_S * 1000))
-            empty_audio.export(temp_file.name, format="wav")
-            return temp_file.name
+        # This function is no longer used. The full audio is passed once.
+        pass
     
-    def process_chunk(self, chunk_id, start_time, frame_path, audio_path):
+    def process_chunk(self, chunk_id, start_time, frame_path):
         """Process single chunk independently"""
         try:
             # Load media
             image = Image.open(frame_path)
             
             # Generate navigation instruction
-            instruction = self.generate_instruction(image, audio_path)
+            instruction = self.generate_instruction(image)
             
             # Format result with timestamp
             end_time = min(start_time + CHUNK_DURATION_S, self.duration)
@@ -166,8 +153,7 @@ class VideoChunkProcessor:
                     os.rmdir(temp_dir)
                 except:
                     pass
-            if os.path.exists(audio_path):
-                os.unlink(audio_path)
+            # No chunked audio file to clean up
             
             return (chunk_id, start_time, result)
             
@@ -175,20 +161,24 @@ class VideoChunkProcessor:
             print(f"Error processing chunk: {e}")  # Added error logging
             return (chunk_id, start_time, f"[{start_time:.1f}s]: Error processing chunk")
     
-    def generate_instruction(self, image, audio_path):
+    def generate_instruction(self, image):
         """Generate navigation instruction for chunk"""
         system_prompt = (
             "You are a real-time navigation assistant for a blind person. "
-            "Give ONE immediate, concise instruction (5-10 words max) based on the scene. "
+            "Listen to the entire audio for context. Then, for the given image frame, "
+            "provide ONE immediate, concise instruction (5-10 words max). "
             "Focus on movement, obstacles, and safety. Be direct."
         )
         
         content = [
-            {"type": "text", "text": system_prompt},
-            {"type": "image", "image": image},
+            {"type": "text", "text": system_prompt}
         ]
-        if audio_path:
-            content.append({"type": "audio", "audio": audio_path})
+        
+        # The full audio is now treated as part of the initial prompt.
+        if self.audio_path and os.path.exists(self.audio_path):
+            content.append({"type": "audio", "audio": self.audio_path})
+            
+        content.append({"type": "image", "image": image})
 
         messages = [{"role": "user", "content": content}]
 

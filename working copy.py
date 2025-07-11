@@ -9,20 +9,22 @@ from pydub import AudioSegment
 import threading
 import time
 from queue import Queue  
-import logging
-from collections import deque
-import googlemaps
-from datetime import datetime
-import re
-from enum import Enum, auto
 
-# --- CONFIGURATION ---
-MODEL_PATH = "/kaggle/input/gemma-3n-/transformers/default/1"
-processor = AutoProcessor.from_pretrained(MODEL_PATH)
+MODEL_PATH = "google/gemma-3n-E2B-it"
+# Import the Colab userdata module to access secrets
+from google.colab import userdata
+import os
+# Load the Hugging Face token from Colab secrets
+HF_TOKEN = userdata.get('HF_TOKEN')
+# Set the HF_TOKEN environment variable
+os.environ['HF_TOKEN'] = HF_TOKEN
+
+processor = AutoProcessor.from_pretrained(MODEL_PATH, token=HF_TOKEN)
 model = AutoModelForImageTextToText.from_pretrained(
     MODEL_PATH,
-    torch_dtype=torch.bfloat16
-).eval().to('cuda')
+    torch_dtype=torch.bfloat16,
+    token=HF_TOKEN,
+).eval().to("cuda")
 
 # Real-time streaming configuration
 CHUNK_DURATION_S = 2.0  # Process 2-second chunks
@@ -222,7 +224,7 @@ class VideoChunkProcessor:
                     do_sample=True,
                     temperature=0.6,
                     repetition_penalty=1.1,
-                    
+                    disable_compile=True,
                     pad_token_id=processor.tokenizer.eos_token_id
                 )
             
